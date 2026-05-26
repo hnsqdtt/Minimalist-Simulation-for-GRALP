@@ -63,6 +63,11 @@ def load_simulation_config(
     if data["DYNAMIC_OBSTACLE_LOOKAHEAD"] <= 0.0:
         raise ValueError("DYNAMIC_OBSTACLE_LOOKAHEAD must be > 0")
 
+    # Every TURN_INTERVAL seconds of sim time each obstacle re-randomises its
+    # motion axis and initial direction (re-centring on its current position
+    # so there is no teleport). 0 or negative disables the periodic turn.
+    data.setdefault("DYNAMIC_OBSTACLE_TURN_INTERVAL", 5.0)
+
     # Wall-clock playback rate (see task.py); does not affect physics or the
     # policy's control dt. 1.0 = real time, <1 = slow motion, >1 = fast.
     data.setdefault("TIME_SCALE", 1.0)

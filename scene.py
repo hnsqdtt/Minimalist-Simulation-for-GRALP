@@ -10,7 +10,9 @@ class DynamicObstacle:
 
     Nominal motion is ``pos = start + sin(eff_t * speed + phase) * range``;
     ``eff_t`` advances by ``dt * slowdown`` per call, so when the robot enters
-    the obstacle's forward cone the sinusoid pauses (and resumes once clear).
+    the obstacle's swept lane the sinusoid pauses (and resumes once clear).
+    Every ``TURN_INTERVAL`` seconds of sim time, the axis and initial sign are
+    re-randomised and ``start`` is re-centred on the current position.
     """
 
     def __init__(self, pos):
@@ -32,6 +34,9 @@ class DynamicObstacle:
         self.phase = random.uniform(0, 2 * math.pi)
         self._eff_t = 0.0
         self._prev_t = None
+        # Stagger the first turn so the crowd doesn't pivot in lockstep.
+        interval = Config.DYNAMIC_OBSTACLE_TURN_INTERVAL
+        self._next_turn_t = random.uniform(0.0, interval) if interval > 0.0 else float("inf")
 
     def update(self, time_t, robot_pos):
         dt = 0.0 if self._prev_t is None else max(0.0, time_t - self._prev_t)
@@ -43,12 +48,28 @@ class DynamicObstacle:
         # d offset / d eff_t = cos(phase) * speed * range; sign is the heading.
         direction = 1.0 if math.cos(phase) >= 0.0 else -1.0
 
+        # Periodic direction reset on sim time — ignores any slowdown pause.
+        if time_t >= self._next_turn_t:
+            self._turn(cur_pos)
+            self._next_turn_t += Config.DYNAMIC_OBSTACLE_TURN_INTERVAL
+            phase = self.phase  # eff_t was reset to 0
+            cur_pos = list(self.start_pos)
+            direction = 1.0 if math.cos(phase) >= 0.0 else -1.0
+
         self._eff_t += dt * self._slowdown(cur_pos, direction, robot_pos)
 
         new_phase = self._eff_t * self.speed + self.phase
         new_pos = list(self.start_pos)
         new_pos[self.axis] += math.sin(new_phase) * self.range
         p.resetBasePositionAndOrientation(self.id, new_pos, [0, 0, 0, 1])
+
+    def _turn(self, cur_pos):
+        # Re-centre on the current position and pick a fresh axis + sign so
+        # the sinusoid restarts smoothly (sin(0 or pi) == 0 -> no teleport).
+        self.start_pos = list(cur_pos)
+        self.axis = random.choice([0, 1])
+        self.phase = random.choice([0.0, math.pi])
+        self._eff_t = 0.0
 
     def _slowdown(self, cur_pos, direction, robot_pos):
         # Project the obstacle->robot vector onto the moving axis; the swept
