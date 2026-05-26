@@ -383,7 +383,7 @@ def main() -> None:
                     except Exception:
                         pass
 
-            scene.update(t)
+            scene.update(t, robot_pos)
             cam_ctrl.update()
             p.stepSimulation()
             robot.update_heading_indicator()

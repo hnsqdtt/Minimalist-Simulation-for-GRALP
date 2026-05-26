@@ -91,7 +91,8 @@ def part_a(runner: PolicyRunner, clamp: bool, n_control: int = 900, seed: int = 
         collided = False
         for _ in range(sub):
             robot.apply_control(vx, om)
-            scene.update(t)
+            rpos, _ = T._world_pose(robot.id)
+            scene.update(t, rpos)
             p.stepSimulation()
             t += Config.TIMESTEP
             if not collided:

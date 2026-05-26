@@ -1,7 +1,10 @@
 import json
 import os
+import random
 from types import SimpleNamespace
 from typing import Optional
+
+import numpy as np
 
 
 def load_model_meta(path: Optional[str] = None) -> dict:
@@ -51,6 +54,26 @@ def load_simulation_config(
     if speed_min > speed_max:
         raise ValueError("DYNAMIC_OBSTACLE_SPEED_RANGE min must be <= max")
     data["DYNAMIC_OBSTACLE_SPEED_RANGE"] = [speed_min, speed_max]
+
+    # Dynamic-obstacle avoidance cone (see scene.DynamicObstacle): when the
+    # robot lies within ``AVOID_LATERAL`` perpendicular to the obstacle's
+    # current motion, its speed scales linearly from full at ``AVOID_FAR``
+    # down to zero at ``AVOID_NEAR``.
+    data.setdefault("DYNAMIC_OBSTACLE_AVOID_LATERAL", 0.5)
+    data.setdefault("DYNAMIC_OBSTACLE_AVOID_NEAR", 0.5)
+    data.setdefault("DYNAMIC_OBSTACLE_AVOID_FAR", 2.0)
+    if data["DYNAMIC_OBSTACLE_AVOID_NEAR"] > data["DYNAMIC_OBSTACLE_AVOID_FAR"]:
+        raise ValueError("DYNAMIC_OBSTACLE_AVOID_NEAR must be <= DYNAMIC_OBSTACLE_AVOID_FAR")
+
+    # Seed both stdlib ``random`` and ``numpy.random`` at config load so every
+    # downstream draw (scene layout, goal sampling, stochastic inference) is
+    # reproducible. ``null`` keeps non-deterministic behaviour.
+    seed = data.get("SEED")
+    if seed is not None:
+        seed = int(seed)
+        random.seed(seed)
+        np.random.seed(seed)
+    data["SEED"] = seed
 
     return SimpleNamespace(**data)
 
