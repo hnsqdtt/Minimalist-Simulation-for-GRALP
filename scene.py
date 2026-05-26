@@ -139,9 +139,12 @@ class Scene:
     def _spawn_static_obstacles(self):
         half_map = Config.MAP_SIZE / 2 - 1.0
         # Every pair of static boxes must keep at least this surface-to-surface
-        # gap, so the planner-side inflation (ROBOT_RADIUS + EXTRA) still leaves
-        # a non-degenerate channel between them.
-        min_gap = Config.ROBOT_RADIUS + Config.OBSTACLE_INFLATION_EXTRA
+        # gap. The planner-side inflation expands EACH obstacle by
+        # ROBOT_RADIUS + EXTRA, so a non-degenerate channel needs the
+        # original gap to exceed twice that inflation; we add 0.01 m of
+        # tolerance so the inflated boundaries leave a hairline corridor
+        # for the LOS heuristic to follow.
+        min_gap = 2.0 * (Config.ROBOT_RADIUS + Config.OBSTACLE_INFLATION_EXTRA) + 0.01
         attempts_per_obstacle = 100
         placed = []  # list of (x, y, half_x, half_y) for placed boxes
         for _ in range(Config.STATIC_OBSTACLE_COUNT):
