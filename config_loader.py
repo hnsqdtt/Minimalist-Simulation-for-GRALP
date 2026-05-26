@@ -58,10 +58,17 @@ def load_simulation_config(
     # Dynamic-obstacle look-ahead (see scene.DynamicObstacle): the obstacle's
     # swept lane is a rectangle of its own perpendicular extent (plus robot
     # radius) extending LOOKAHEAD metres past its leading edge; speed ramps
-    # linearly from full at the far end down to zero on body-to-body contact.
+    # linearly from full at LOOKAHEAD down to zero at STOP_CLEARANCE — the
+    # surface-to-surface gap at which the obstacle fully stops (>=0; raise
+    # this to give the policy a bit more buffer before contact).
     data.setdefault("DYNAMIC_OBSTACLE_LOOKAHEAD", 2.0)
+    data.setdefault("DYNAMIC_OBSTACLE_STOP_CLEARANCE", 0.05)
     if data["DYNAMIC_OBSTACLE_LOOKAHEAD"] <= 0.0:
         raise ValueError("DYNAMIC_OBSTACLE_LOOKAHEAD must be > 0")
+    if data["DYNAMIC_OBSTACLE_STOP_CLEARANCE"] < 0.0:
+        raise ValueError("DYNAMIC_OBSTACLE_STOP_CLEARANCE must be >= 0")
+    if data["DYNAMIC_OBSTACLE_STOP_CLEARANCE"] >= data["DYNAMIC_OBSTACLE_LOOKAHEAD"]:
+        raise ValueError("DYNAMIC_OBSTACLE_STOP_CLEARANCE must be < DYNAMIC_OBSTACLE_LOOKAHEAD")
 
     # Every TURN_INTERVAL seconds of sim time each obstacle re-randomises its
     # motion axis and initial direction (re-centring on its current position

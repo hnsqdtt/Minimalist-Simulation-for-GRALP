@@ -88,14 +88,16 @@ class DynamicObstacle:
         if forward <= 0.0 or abs(lateral) > half_perp + r:
             return 1.0
         # Surface-to-surface gap between the obstacle's leading edge and
-        # the robot body, along the motion axis.
+        # the robot body, along the motion axis. We stop while there is
+        # still STOP_CLEARANCE of gap left, so the bodies never quite touch.
         gap = forward - half_along - r
+        stop = Config.DYNAMIC_OBSTACLE_STOP_CLEARANCE
         lookahead = Config.DYNAMIC_OBSTACLE_LOOKAHEAD
-        if gap <= 0.0:
+        if gap <= stop:
             return 0.0
         if gap >= lookahead:
             return 1.0
-        return gap / lookahead
+        return (gap - stop) / (lookahead - stop)
 
 
 class Scene:
