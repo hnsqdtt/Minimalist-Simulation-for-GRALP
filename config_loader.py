@@ -1,43 +1,48 @@
-﻿import json
-import math
+import json
 import os
 from types import SimpleNamespace
 from typing import Optional
 
 
-def load_ppo_config(path: Optional[str] = None) -> dict:
-    """Load PPO config values."""
-    base_dir = os.path.dirname(__file__)
-    ppo_config_path = path or os.path.join(base_dir, "ppo_api", "config.json")
-    with open(ppo_config_path, "r", encoding="utf-8") as f:
+def load_model_meta(path: Optional[str] = None) -> dict:
+    """Load the policy export descriptor written by tools/export_onnx.py."""
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    meta_path = path or os.path.join(base_dir, "model", "meta.json")
+    with open(meta_path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
 def load_simulation_config(
     sim_config_path: Optional[str] = None,
-    ppo_config_path: Optional[str] = None,
+    meta_path: Optional[str] = None,
 ) -> SimpleNamespace:
-    """Merge simulation config with PPO config and derive lidar/control fields."""
-    base_dir = os.path.dirname(__file__)
+    """Merge simulation_config.json with the policy contract from model/meta.json.
+
+    Lidar range / ray count and control limits come from meta.json, so the
+    simulated observation always matches what the policy was trained on.
+    """
+    base_dir = os.path.dirname(os.path.abspath(__file__))
     config_path = sim_config_path or os.path.join(base_dir, "simulation_config.json")
     with open(config_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    ppo_cfg = load_ppo_config(ppo_config_path)
-    patch_meters = ppo_cfg.get("patch_meters")
-    ray_max_gap = ppo_cfg.get("ray_max_gap")
-    vx_max = ppo_cfg.get("vx_max", 1.5)
-    omega_max = ppo_cfg.get("omega_max", 2.0)
+    meta = load_model_meta(meta_path)
+    obs = meta.get("obs") or {}
+    limits = meta.get("limits") or {}
+    patch_meters = obs.get("patch_meters")
+    rays = obs.get("rays")
+    if patch_meters is None or rays is None:
+        raise ValueError("model/meta.json must provide obs.patch_meters and obs.rays")
 
-    if patch_meters is None or ray_max_gap is None:
-        raise ValueError("ppo_api config.json must provide patch_meters and ray_max_gap")
-
+    # Lidar must reproduce the policy's observation contract exactly.
     data.setdefault("LIDAR_FOV", 360)
     data["LIDAR_RANGE"] = float(patch_meters)
-    data["LIDAR_NUM_RAYS"] = int(math.ceil((2 * math.pi * patch_meters) / ray_max_gap))
-    data["CTRL_VX_MAX"] = float(vx_max)
-    data["CTRL_OMEGA_MAX"] = float(omega_max)
+    data["LIDAR_NUM_RAYS"] = int(rays)
+    data["CTRL_VX_MAX"] = float(limits.get("vx_max", 1.5))
+    data["CTRL_OMEGA_MAX"] = float(limits.get("omega_max", 2.0))
     data.setdefault("OBSTACLE_INFLATION_EXTRA", 0.1)
+    data.setdefault("INFERENCE_BACKEND", "auto")
+    data.setdefault("INFERENCE_DEVICE", "cpu")
 
     speed_range = data.get("DYNAMIC_OBSTACLE_SPEED_RANGE", [0.5, 1.5])
     if not isinstance(speed_range, (list, tuple)) or len(speed_range) != 2:

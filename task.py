@@ -8,7 +8,7 @@ import pybullet as p
 
 from camera_ctrl import CameraController
 from config_loader import Config
-from ppo_api.inference import PPOInference
+from policy_runner import PolicyRunner
 from robot import Robot
 from scene import Scene
 
@@ -268,7 +268,7 @@ def main() -> None:
     scene = Scene()
     robot = Robot()
     cam_ctrl = CameraController()
-    ppo = PPOInference()
+    runner = PolicyRunner(backend=Config.INFERENCE_BACKEND, device=Config.INFERENCE_DEVICE)
 
     clearance = Config.ROBOT_RADIUS * 2.5
     goal = _sample_goal(robot.id, clearance)
@@ -280,7 +280,7 @@ def main() -> None:
     prev_prev_omega = 0.0
     hold_vx = 0.0
     hold_omega = 0.0
-    control_interval = float(ppo.cfg.dt)
+    control_interval = float(runner.dt)
     next_control_time = 0.0
 
     local_dbg: List[int] = []
@@ -296,14 +296,14 @@ def main() -> None:
                 robot_pos, yaw = _world_pose(robot.id)
                 raw_lidar = robot.get_lidar_data()
                 ranges = np.asarray(raw_lidar, dtype=np.float32)
-                adjusted_ranges, los_points = _build_los_points(robot_pos, yaw, ranges, ppo.cfg.patch_meters)
+                adjusted_ranges, los_points = _build_los_points(robot_pos, yaw, ranges, runner.patch_meters)
 
                 local_target = _select_local_target(los_points, robot_pos, yaw, (goal[0], goal[1]))
                 sin_ref, cos_ref, task_dist = _direction_to_target(robot_pos, yaw, local_target)
-                task_dist = min(task_dist, ppo.cfg.patch_meters)
+                task_dist = min(task_dist, runner.patch_meters)
 
                 try:
-                    action = ppo.infer(
+                    action = runner.infer(
                         rays_m=adjusted_ranges,
                         sin_ref=sin_ref,
                         cos_ref=cos_ref,
