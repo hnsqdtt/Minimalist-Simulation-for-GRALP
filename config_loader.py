@@ -85,6 +85,13 @@ def load_simulation_config(
     if data["TIME_SCALE"] <= 0.0:
         raise ValueError("TIME_SCALE must be > 0")
 
+    # On-screen trajectory length cap (one segment per physics step,
+    # ~TIMESTEP seconds each). 0 disables the trail entirely.
+    data.setdefault("TRAIL_MAX_SEGMENTS", 2000)
+    data["TRAIL_MAX_SEGMENTS"] = int(data["TRAIL_MAX_SEGMENTS"])
+    if data["TRAIL_MAX_SEGMENTS"] < 0:
+        raise ValueError("TRAIL_MAX_SEGMENTS must be >= 0")
+
     # Seed both stdlib ``random`` and ``numpy.random`` at config load so every
     # downstream draw (scene layout, goal sampling, stochastic inference) is
     # reproducible. ``null`` keeps non-deterministic behaviour.

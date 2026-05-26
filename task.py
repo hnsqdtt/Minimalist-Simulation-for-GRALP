@@ -285,7 +285,7 @@ def main() -> None:
 
     local_dbg: List[int] = []
     trail_dbg: List[int] = []
-    trail_max_len = 2000
+    trail_max_len = Config.TRAIL_MAX_SEGMENTS
     robot_is_green = False
 
     t = 0.0
@@ -358,30 +358,32 @@ def main() -> None:
                 p.changeVisualShape(robot.id, -1, rgbaColor=target_color)
                 robot_is_green = collided
 
-            # Draw trajectory segment; darker color for higher speed.
             robot_pos, _ = _world_pose(robot.id)
-            speed_mag = min(math.hypot(hold_vx, hold_omega), 1.0)
-            base_color = np.array([0.2, 0.8, 1.0], dtype=np.float32)
-            color = (base_color * (0.3 + 0.7 * speed_mag)).tolist()
-            if "last_trail_pos" not in locals():
-                last_trail_pos = robot_pos
-            else:
-                trail_dbg.append(
-                    p.addUserDebugLine(
-                        [last_trail_pos[0], last_trail_pos[1], last_trail_pos[2] + 0.02],
-                        [robot_pos[0], robot_pos[1], robot_pos[2] + 0.02],
-                        color,
-                        lifeTime=0,
-                        lineWidth=2,
+
+            # Draw trajectory segment; darker colour for higher speed.
+            # trail_max_len == 0 disables the trail entirely.
+            if trail_max_len > 0:
+                speed_mag = min(math.hypot(hold_vx, hold_omega), 1.0)
+                base_color = np.array([0.2, 0.8, 1.0], dtype=np.float32)
+                color = (base_color * (0.3 + 0.7 * speed_mag)).tolist()
+                if "last_trail_pos" not in locals():
+                    last_trail_pos = robot_pos
+                else:
+                    trail_dbg.append(
+                        p.addUserDebugLine(
+                            [last_trail_pos[0], last_trail_pos[1], last_trail_pos[2] + 0.02],
+                            [robot_pos[0], robot_pos[1], robot_pos[2] + 0.02],
+                            color,
+                            lifeTime=0,
+                            lineWidth=2,
+                        )
                     )
-                )
-                last_trail_pos = robot_pos
-                # Limit trail length to avoid overflow.
-                if len(trail_dbg) > trail_max_len:
-                    try:
-                        p.removeUserDebugItem(trail_dbg.pop(0))
-                    except Exception:
-                        pass
+                    last_trail_pos = robot_pos
+                    if len(trail_dbg) > trail_max_len:
+                        try:
+                            p.removeUserDebugItem(trail_dbg.pop(0))
+                        except Exception:
+                            pass
 
             scene.update(t, robot_pos)
             cam_ctrl.update()
