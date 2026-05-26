@@ -57,18 +57,22 @@ def load_simulation_config(
 
     # Dynamic-obstacle look-ahead (see scene.DynamicObstacle): the obstacle's
     # swept lane is a rectangle of its own perpendicular extent (plus robot
-    # radius) extending LOOKAHEAD metres past its leading edge; speed ramps
-    # linearly from full at LOOKAHEAD down to zero at STOP_CLEARANCE — the
-    # surface-to-surface gap at which the obstacle fully stops (>=0; raise
-    # this to give the policy a bit more buffer before contact).
+    # radius and LATERAL_CLEARANCE buffer) extending LOOKAHEAD metres past its
+    # leading edge; speed ramps linearly from full at LOOKAHEAD down to zero
+    # at STOP_CLEARANCE — the surface-to-surface gap at which the obstacle
+    # fully stops. LATERAL_CLEARANCE widens the detection lane on both sides
+    # so the obstacle still notices a robot grazing past its corner.
     data.setdefault("DYNAMIC_OBSTACLE_LOOKAHEAD", 2.0)
     data.setdefault("DYNAMIC_OBSTACLE_STOP_CLEARANCE", 0.05)
+    data.setdefault("DYNAMIC_OBSTACLE_LATERAL_CLEARANCE", 0.05)
     if data["DYNAMIC_OBSTACLE_LOOKAHEAD"] <= 0.0:
         raise ValueError("DYNAMIC_OBSTACLE_LOOKAHEAD must be > 0")
     if data["DYNAMIC_OBSTACLE_STOP_CLEARANCE"] < 0.0:
         raise ValueError("DYNAMIC_OBSTACLE_STOP_CLEARANCE must be >= 0")
     if data["DYNAMIC_OBSTACLE_STOP_CLEARANCE"] >= data["DYNAMIC_OBSTACLE_LOOKAHEAD"]:
         raise ValueError("DYNAMIC_OBSTACLE_STOP_CLEARANCE must be < DYNAMIC_OBSTACLE_LOOKAHEAD")
+    if data["DYNAMIC_OBSTACLE_LATERAL_CLEARANCE"] < 0.0:
+        raise ValueError("DYNAMIC_OBSTACLE_LATERAL_CLEARANCE must be >= 0")
 
     # Every TURN_INTERVAL seconds of sim time each obstacle re-randomises its
     # motion axis and initial direction (re-centring on its current position

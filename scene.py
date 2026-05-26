@@ -85,7 +85,9 @@ class DynamicObstacle:
         half_perp = self.size[1 - self.axis] / 2.0
         r = Config.ROBOT_RADIUS
         # Robot is behind us or outside the swept lane: keep nominal speed.
-        if forward <= 0.0 or abs(lateral) > half_perp + r:
+        # LATERAL_CLEARANCE pads the lane on each side so we still notice a
+        # robot just grazing past the obstacle's corner.
+        if forward <= 0.0 or abs(lateral) > half_perp + r + Config.DYNAMIC_OBSTACLE_LATERAL_CLEARANCE:
             return 1.0
         # Surface-to-surface gap between the obstacle's leading edge and
         # the robot body, along the motion axis. We stop while there is
