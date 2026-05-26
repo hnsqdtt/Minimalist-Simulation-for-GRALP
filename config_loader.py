@@ -55,15 +55,19 @@ def load_simulation_config(
         raise ValueError("DYNAMIC_OBSTACLE_SPEED_RANGE min must be <= max")
     data["DYNAMIC_OBSTACLE_SPEED_RANGE"] = [speed_min, speed_max]
 
-    # Dynamic-obstacle avoidance cone (see scene.DynamicObstacle): when the
-    # robot lies within ``AVOID_LATERAL`` perpendicular to the obstacle's
-    # current motion, its speed scales linearly from full at ``AVOID_FAR``
-    # down to zero at ``AVOID_NEAR``.
-    data.setdefault("DYNAMIC_OBSTACLE_AVOID_LATERAL", 0.5)
-    data.setdefault("DYNAMIC_OBSTACLE_AVOID_NEAR", 0.5)
-    data.setdefault("DYNAMIC_OBSTACLE_AVOID_FAR", 2.0)
-    if data["DYNAMIC_OBSTACLE_AVOID_NEAR"] > data["DYNAMIC_OBSTACLE_AVOID_FAR"]:
-        raise ValueError("DYNAMIC_OBSTACLE_AVOID_NEAR must be <= DYNAMIC_OBSTACLE_AVOID_FAR")
+    # Dynamic-obstacle look-ahead (see scene.DynamicObstacle): the obstacle's
+    # swept lane is a rectangle of its own perpendicular extent (plus robot
+    # radius) extending LOOKAHEAD metres past its leading edge; speed ramps
+    # linearly from full at the far end down to zero on body-to-body contact.
+    data.setdefault("DYNAMIC_OBSTACLE_LOOKAHEAD", 2.0)
+    if data["DYNAMIC_OBSTACLE_LOOKAHEAD"] <= 0.0:
+        raise ValueError("DYNAMIC_OBSTACLE_LOOKAHEAD must be > 0")
+
+    # Wall-clock playback rate (see task.py); does not affect physics or the
+    # policy's control dt. 1.0 = real time, <1 = slow motion, >1 = fast.
+    data.setdefault("TIME_SCALE", 1.0)
+    if data["TIME_SCALE"] <= 0.0:
+        raise ValueError("TIME_SCALE must be > 0")
 
     # Seed both stdlib ``random`` and ``numpy.random`` at config load so every
     # downstream draw (scene layout, goal sampling, stochastic inference) is

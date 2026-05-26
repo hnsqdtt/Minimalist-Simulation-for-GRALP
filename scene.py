@@ -51,23 +51,30 @@ class DynamicObstacle:
         p.resetBasePositionAndOrientation(self.id, new_pos, [0, 0, 0, 1])
 
     def _slowdown(self, cur_pos, direction, robot_pos):
-        # Project the obstacle->robot vector onto the moving axis.
+        # Project the obstacle->robot vector onto the moving axis; the swept
+        # lane is a rectangle of the obstacle's own width (plus robot radius)
+        # extending LOOKAHEAD beyond its leading edge.
         dx = robot_pos[0] - cur_pos[0]
         dy = robot_pos[1] - cur_pos[1]
         if self.axis == 0:
             forward, lateral = dx * direction, dy
         else:
             forward, lateral = dy * direction, dx
-        # Robot is behind us or off to the side: keep the nominal speed.
-        if forward <= 0.0 or abs(lateral) > Config.DYNAMIC_OBSTACLE_AVOID_LATERAL:
+        half_along = self.size[self.axis] / 2.0
+        half_perp = self.size[1 - self.axis] / 2.0
+        r = Config.ROBOT_RADIUS
+        # Robot is behind us or outside the swept lane: keep nominal speed.
+        if forward <= 0.0 or abs(lateral) > half_perp + r:
             return 1.0
-        near = Config.DYNAMIC_OBSTACLE_AVOID_NEAR
-        far = Config.DYNAMIC_OBSTACLE_AVOID_FAR
-        if forward <= near:
+        # Surface-to-surface gap between the obstacle's leading edge and
+        # the robot body, along the motion axis.
+        gap = forward - half_along - r
+        lookahead = Config.DYNAMIC_OBSTACLE_LOOKAHEAD
+        if gap <= 0.0:
             return 0.0
-        if forward >= far:
+        if gap >= lookahead:
             return 1.0
-        return (forward - near) / (far - near)
+        return gap / lookahead
 
 
 class Scene:

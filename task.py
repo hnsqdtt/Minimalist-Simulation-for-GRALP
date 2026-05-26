@@ -388,7 +388,7 @@ def main() -> None:
             p.stepSimulation()
             robot.update_heading_indicator()
 
-            time.sleep(Config.TIMESTEP)
+            time.sleep(Config.TIMESTEP / Config.TIME_SCALE)
             t += Config.TIMESTEP
 
     except KeyboardInterrupt:
