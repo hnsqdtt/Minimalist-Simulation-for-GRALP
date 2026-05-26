@@ -136,21 +136,45 @@ class Scene:
 
     def _spawn_static_obstacles(self):
         half_map = Config.MAP_SIZE / 2 - 1.0
+        # Every pair of static boxes must keep at least this surface-to-surface
+        # gap, so the planner-side inflation (ROBOT_RADIUS + EXTRA) still leaves
+        # a non-degenerate channel between them.
+        min_gap = Config.ROBOT_RADIUS + Config.OBSTACLE_INFLATION_EXTRA
+        attempts_per_obstacle = 100
+        placed = []  # list of (x, y, half_x, half_y) for placed boxes
         for _ in range(Config.STATIC_OBSTACLE_COUNT):
-            x = random.uniform(-half_map, half_map)
-            y = random.uniform(-half_map, half_map)
-            if abs(x) < 1.0 and abs(y) < 1.0:
-                continue
+            for _ in range(attempts_per_obstacle):
+                x = random.uniform(-half_map, half_map)
+                y = random.uniform(-half_map, half_map)
+                if abs(x) < 1.0 and abs(y) < 1.0:
+                    continue
+                size = [random.uniform(0.2, 0.8) for _ in range(3)]
+                hx, hy = size[0], size[1]
+                # L2 surface-to-surface distance between two AABBs.
+                too_close = False
+                for px, py, phx, phy in placed:
+                    dx = max(0.0, abs(x - px) - hx - phx)
+                    dy = max(0.0, abs(y - py) - hy - phy)
+                    if math.hypot(dx, dy) < min_gap:
+                        too_close = True
+                        break
+                if too_close:
+                    continue
 
-            size = [random.uniform(0.2, 0.8) for _ in range(3)]
-            col = p.createCollisionShape(p.GEOM_BOX, halfExtents=size)
-            vis = p.createVisualShape(p.GEOM_BOX, halfExtents=size, rgbaColor=[0.5, 0.5, 0.5, 1])
-            p.createMultiBody(
-                baseMass=0,
-                baseCollisionShapeIndex=col,
-                baseVisualShapeIndex=vis,
-                basePosition=[x, y, size[2]],
-            )
+                col = p.createCollisionShape(p.GEOM_BOX, halfExtents=size)
+                vis = p.createVisualShape(p.GEOM_BOX, halfExtents=size, rgbaColor=[0.5, 0.5, 0.5, 1])
+                p.createMultiBody(
+                    baseMass=0,
+                    baseCollisionShapeIndex=col,
+                    baseVisualShapeIndex=vis,
+                    basePosition=[x, y, size[2]],
+                )
+                placed.append((x, y, hx, hy))
+                break
+            # If we never break out, this slot is silently dropped.
+        if len(placed) < Config.STATIC_OBSTACLE_COUNT:
+            print(f"[scene] placed {len(placed)}/{Config.STATIC_OBSTACLE_COUNT} "
+                  f"static obstacles (clearance >= {min_gap:.3f} m)")
 
     def _spawn_dynamic_obstacles(self):
         half_map = Config.MAP_SIZE / 2 - 1.5
