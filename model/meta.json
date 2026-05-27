@@ -28,9 +28,10 @@
   },
   "limits": {
     "vx_max": 0.6,
-    "omega_max": 1.5
+    "omega_max": 1.5,
+    "vx_forward_only": true
   },
   "dt": 0.1,
   "source": "latest.pt",
-  "step": 134742016
+  "step": 65011712
 }
