@@ -9,8 +9,22 @@ exposes a single ``infer()`` that turns metric lidar rays + pose into a
 Observation contract (see README.md): ``obs = [rays_norm(R), pose(7)]``, with
 ``obs_dim = R + 7``. ``rays_norm`` is the metric ranges divided by
 ``patch_meters``; the 7-dim pose tail is
-``[sin_ref, cos_ref, prev_vx/vx_max, prev_omega/omega_max,
-   dvx/(2*vx_max), domega/(2*omega_max), task_dist/patch_meters]``.
+``[sin_ref, cos_ref,
+   (prev_vx - vx_center)/vx_half, prev_omega/omega_max,
+   (prev_vx - prev_prev_vx)/(2*vx_half),
+   (prev_omega - prev_prev_omega)/(2*omega_max),
+   task_dist/patch_meters]``,
+where ``(vx_center, vx_half) = (0, vx_max)`` in symmetric mode and
+``(vx_max/2, vx_max/2)`` when ``meta.json:limits.vx_forward_only`` is true.
+The symmetric case reduces to the legacy ``prev_vx/vx_max`` form.
+
+Action contract: deterministic actions are ``center + tanh(mu) * scale`` with
+``(center, scale) = (0, vx_max)`` in symmetric mode and ``(vx_max/2, vx_max/2)``
+in forward-only mode, applied per axis. The ONNX graph itself bakes the
+forward-only choice in at export time, so the onnx backend reads ``action``
+directly from the graph; the torch backend and the sampling path reproduce
+the same affine via ``_affine_squash`` -- which MUST stay byte-equivalent to
+``tools/export_onnx.py:_Wrapper.forward`` in the training repo.
 """
 from __future__ import annotations
 
@@ -25,6 +39,37 @@ ArrayLike = Union[float, Sequence[float], np.ndarray]
 POSE_DIM = 7
 DEFAULT_MODEL_DIR = Path(__file__).resolve().parent / "model"
 DEFAULT_MODEL_CONFIG = Path(__file__).resolve().parent / "model_config.json"
+
+
+# --------------------------------------------------------------------------
+# action-space affine (must mirror tools/export_onnx.py:_Wrapper.forward)
+# --------------------------------------------------------------------------
+def _axis_center_scale(vx_max: float, omega_max: float,
+                       vx_forward_only: bool) -> tuple:
+    """Return per-axis (center, scale) used for both squash and obs normalization.
+
+    Symmetric mode (vx_forward_only=False) -> ((0, vx_max), (0, omega_max));
+    the squash reduces to ``tanh(x) * limits``. Forward-only mode shifts the
+    vx axis to ``((vx_max/2, vx_max/2), (0, omega_max))`` so ``tanh(mu_vx)``
+    spans [0, vx_max].
+    """
+    if vx_forward_only:
+        vx_center, vx_scale = 0.5 * vx_max, 0.5 * vx_max
+    else:
+        vx_center, vx_scale = 0.0, vx_max
+    return (vx_center, vx_scale), (0.0, omega_max)
+
+
+def _affine_squash(pre_tanh: np.ndarray, vx_max: float, omega_max: float,
+                   vx_forward_only: bool) -> np.ndarray:
+    """Apply the squash + per-axis affine. KEEP IN SYNC with the training
+    repo's ``tools/export_onnx.py:_Wrapper.forward`` -- the startup self-check
+    in ``PolicyRunner.__init__`` will trip if they ever drift."""
+    (vx_c, vx_s), (om_c, om_s) = _axis_center_scale(vx_max, omega_max, vx_forward_only)
+    a = np.tanh(pre_tanh)
+    action = np.stack([vx_c + a[..., 0] * vx_s,
+                       om_c + a[..., 1] * om_s], axis=-1)
+    return action.astype(np.float32)
 
 
 # --------------------------------------------------------------------------
@@ -86,8 +131,14 @@ def _normalize_rays(rays_m: np.ndarray, patch_meters: float) -> np.ndarray:
 
 
 def _build_pose(batch: int, *, sin_ref, cos_ref, prev_vx, prev_omega, prev_prev_vx,
-                prev_prev_omega, task_dist, vx_max, omega_max, patch_meters) -> np.ndarray:
-    """Assemble the 7-dim pose tail; every field is a scalar or a length-``batch`` array."""
+                prev_prev_omega, task_dist, vx_max, omega_max, patch_meters,
+                vx_forward_only: bool = False) -> np.ndarray:
+    """Assemble the 7-dim pose tail; every field is a scalar or a length-``batch`` array.
+
+    The vx components are normalized around the axis center so the network sees
+    a zero-centered signal in both action modes. Symmetric mode reduces to the
+    legacy ``prev_vx/vx_max`` form (center=0, half=vx_max).
+    """
     def as_b(x, name: str) -> np.ndarray:
         arr = np.asarray(x, dtype=np.float32)
         if arr.ndim == 0:
@@ -115,12 +166,14 @@ def _build_pose(batch: int, *, sin_ref, cos_ref, prev_vx, prev_omega, prev_prev_
     if (td_v < 0.0).any() or (td_v > patch_meters).any():
         raise ValueError(f"task_dist must lie in [0, patch_meters={patch_meters}]")
 
+    (vx_c, vx_s), (_om_c, _om_s) = _axis_center_scale(vx_max, omega_max, vx_forward_only)
+    vx_half = max(vx_s, 1e-9)
     pose = np.stack([
         sin_v,
         cos_v,
-        prev_vx_v / max(vx_max, 1e-9),
+        (prev_vx_v - vx_c) / vx_half,
         prev_om_v / max(omega_max, 1e-9),
-        (prev_vx_v - pp_vx_v) / max(2.0 * vx_max, 1e-9),
+        (prev_vx_v - pp_vx_v) / (2.0 * vx_half),
         (prev_om_v - pp_om_v) / max(2.0 * omega_max, 1e-9),
         td_v / max(patch_meters, 1e-9),
     ], axis=-1)
@@ -157,8 +210,13 @@ class _OnnxBackend:
             str(onnx_path), providers=_select_onnx_providers(ort, device))
 
     def run(self, obs: np.ndarray, limits: np.ndarray):
-        mu, log_std = self.session.run(["mu", "log_std"], {"obs": obs, "limits": limits})
-        return np.asarray(mu, dtype=np.float32), np.asarray(log_std, dtype=np.float32)
+        """Return (action, mu, log_std). ``action`` comes straight from the
+        graph -- the forward-only affine is already baked in at export time."""
+        action, mu, log_std = self.session.run(
+            ["action", "mu", "log_std"], {"obs": obs, "limits": limits})
+        return (np.asarray(action, dtype=np.float32),
+                np.asarray(mu, dtype=np.float32),
+                np.asarray(log_std, dtype=np.float32))
 
 
 class _TorchBackend:
@@ -197,12 +255,24 @@ class _TorchBackend:
         self.device = torch.device("cuda" if (want_cuda and torch.cuda.is_available()) else "cpu")
         self.policy = policy.to(self.device).eval()
         self._torch = torch
+        # The .pt weights only emit (mu, log_std) -- the action-space affine
+        # must be reproduced here to match the ONNX graph.
+        self._vx_max = float(meta["limits"]["vx_max"])
+        self._omega_max = float(meta["limits"]["omega_max"])
+        self._vx_forward_only = bool(meta["limits"].get("vx_forward_only", False))
 
     def run(self, obs: np.ndarray, limits: np.ndarray):
+        """Return (action, mu, log_std). ``action`` is squashed in-runner because
+        the .pt weights don't carry the affine; uses _affine_squash to stay
+        in lock-step with the ONNX graph."""
         with self._torch.no_grad():
             t_obs = self._torch.from_numpy(np.ascontiguousarray(obs)).to(self.device)
             mu, log_std = self.policy(t_obs)
-        return mu.cpu().numpy().astype(np.float32), log_std.cpu().numpy().astype(np.float32)
+        mu_np = mu.cpu().numpy().astype(np.float32)
+        log_std_np = log_std.cpu().numpy().astype(np.float32)
+        action_np = _affine_squash(mu_np, self._vx_max, self._omega_max,
+                                   self._vx_forward_only)
+        return action_np, mu_np, log_std_np
 
 
 # --------------------------------------------------------------------------
@@ -235,6 +305,7 @@ class PolicyRunner:
         self.pose_dim = int(obs.get("pose_dim", POSE_DIM))
         self.vx_max = float(meta["limits"]["vx_max"])
         self.omega_max = float(meta["limits"]["omega_max"])
+        self.vx_forward_only = bool(meta["limits"].get("vx_forward_only", False))
         self.dt = float(meta["dt"])
         self.action_dim = int(meta["action_dim"])
 
@@ -243,11 +314,34 @@ class PolicyRunner:
         chosen = self._choose_backend(backend, onnx_path, pt_path)
         if chosen == "onnx":
             self._backend = _OnnxBackend(onnx_path, device)
+            self._selfcheck_onnx_affine()
         else:
             mc_path = Path(model_config_path) if model_config_path is not None \
                 else DEFAULT_MODEL_CONFIG
             self._backend = _TorchBackend(pt_path, meta, mc_path, device)
         self.backend = self._backend.kind
+
+    def _selfcheck_onnx_affine(self, *, atol: float = 1e-4) -> None:
+        """Fire a dummy obs through ONNX and confirm ``action == _affine_squash(mu)``.
+
+        This is a cheap one-shot guard against future drift between the ONNX
+        graph (produced by tools/export_onnx.py:_Wrapper.forward in the training
+        repo) and this runner's _affine_squash helper. If you see this raise,
+        the two implementations have diverged -- fix the helper, don't suppress.
+        """
+        dummy_obs = np.zeros((1, self.obs_dim), dtype=np.float32)
+        dummy_limits = np.asarray([[self.vx_max, self.omega_max]], dtype=np.float32)
+        action_graph, mu, _ = self._backend.run(dummy_obs, dummy_limits)
+        action_helper = _affine_squash(mu, self.vx_max, self.omega_max,
+                                       self.vx_forward_only)
+        err = float(np.max(np.abs(action_graph - action_helper)))
+        if err > atol:
+            raise RuntimeError(
+                f"ONNX graph and _affine_squash disagree (max|delta|={err:.3e} > {atol}). "
+                "Either the graph was exported with a different vx_forward_only than "
+                f"meta.json reports ({self.vx_forward_only}), or the helper here drifted "
+                "from tools/export_onnx.py:_Wrapper.forward in the training repo."
+            )
 
     @staticmethod
     def _choose_backend(backend: str, onnx_path: Path, pt_path: Path) -> str:
@@ -289,16 +383,19 @@ class PolicyRunner:
                            prev_vx=prev_vx, prev_omega=prev_omega,
                            prev_prev_vx=prev_prev_vx, prev_prev_omega=prev_prev_omega,
                            task_dist=task_dist, vx_max=self.vx_max,
-                           omega_max=self.omega_max, patch_meters=self.patch_meters)
+                           omega_max=self.omega_max, patch_meters=self.patch_meters,
+                           vx_forward_only=self.vx_forward_only)
         obs = np.concatenate([rays_n, pose], axis=-1).astype(np.float32)
         limits = np.tile(np.array([self.vx_max, self.omega_max], dtype=np.float32), (batch, 1))
 
-        mu, log_std = self._backend.run(obs, limits)
+        action_det, mu, log_std = self._backend.run(obs, limits)
         if deterministic:
-            pre_tanh = mu
+            # Trust the backend (graph for onnx, _affine_squash for torch).
+            action = action_det
         else:
             eps = np.random.standard_normal(mu.shape).astype(np.float32)
             pre_tanh = mu + np.exp(log_std) * eps
-        action = (np.tanh(pre_tanh) * limits).astype(np.float32)
+            action = _affine_squash(pre_tanh, self.vx_max, self.omega_max,
+                                    self.vx_forward_only)
 
         return action[0] if single else action

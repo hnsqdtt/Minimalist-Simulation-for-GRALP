@@ -90,18 +90,26 @@ obs = [ rays_norm(R) , pose(7) ]
 |---|---|---|
 | 0 | `sin_ref` | 局部目标方向（车体系）的正弦 |
 | 1 | `cos_ref` | 局部目标方向（车体系）的余弦；要求 `sin² + cos² ≈ 1` |
-| 2 | `prev_vx / vx_max` | 上一帧线速度，归一化 |
+| 2 | `(prev_vx − vx_center) / vx_half` | 上一帧线速度，中心化归一 |
 | 3 | `prev_omega / omega_max` | 上一帧角速度，归一化 |
-| 4 | `(prev_vx − prev_prev_vx) / (2·vx_max)` | 线速度一阶差分 |
+| 4 | `(prev_vx − prev_prev_vx) / (2·vx_half)` | 线速度一阶差分 |
 | 5 | `(prev_omega − prev_prev_omega) / (2·omega_max)` | 角速度一阶差分 |
 | 6 | `task_dist / patch_meters` | 局部目标距离，归一化 |
+
+`(vx_center, vx_half)` 由 `meta.json:limits.vx_forward_only` 决定：
+- 对称模式（`false`）：`(0, vx_max)`；上表 2/4 项即退化为 `prev_vx/vx_max` 和 `(prev−pp)/(2·vx_max)`，与旧版兼容
+- 前向单向模式（`true`）：`(vx_max/2, vx_max/2)`；把 `prev_vx ∈ [0, vx_max]` 映射到 `[−1, +1]`
 
 ### 动作规范
 
 `infer()` 返回 `[vx, omega]`，SI 单位：
 
-- `vx ∈ [−vx_max, vx_max]`，`omega ∈ [−omega_max, omega_max]`
-- 确定性动作 = `tanh(mu) · limits`；传 `deterministic=False` 则按训练分布采样
+- `omega ∈ [−omega_max, omega_max]`
+- `vx ∈ [−vx_max, vx_max]`（对称模式）或 `vx ∈ [0, vx_max]`（`vx_forward_only=true`）
+- 确定性动作 = `vx_center + tanh(mu_vx)·vx_half`（vx 维），`tanh(mu_om)·omega_max`（omega 维）
+  - ONNX 后端：直接读取图输出的 `action`（前向单向仿射已在导出时烘焙进图）
+  - Torch 后端 / 采样模式：runner 内部用同等公式（`_affine_squash`）算出；启动时会跑一次 ONNX vs helper 的自检
+- 传 `deterministic=False` 则在 `pre_tanh` 域加 `σ·ε` 噪声后走同一仿射
 
 ## PolicyRunner 接口
 
