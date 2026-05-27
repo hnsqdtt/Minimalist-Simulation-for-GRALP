@@ -1,7 +1,7 @@
 """GRALP policy networks — inference-only, self-contained.
 
 A trimmed single-file copy of the training repo's ``models/`` package: the four
-encoder kinds (``gralp_attn`` / ``cnn_circular`` / ``cnn_zeropad`` / ``mlp``) and
+encoder kinds (``circular_attn`` / ``cnn_circular`` / ``cnn_zeropad`` / ``mlp``) and
 a ``PPOPolicy`` head. Module and parameter names are kept identical to the
 training repo, so a checkpoint exported there loads here with ``strict=True``.
 
@@ -47,7 +47,7 @@ class EncoderBase(nn.Module):
 
 
 # --------------------------------------------------------------------------
-# gralp_attn: circular dilated conv branch + multi-query, multi-head attention
+# circular_attn: circular dilated conv branch + multi-query, multi-head attention
 # --------------------------------------------------------------------------
 class _SqueezeExcite1D(nn.Module):
     def __init__(self, ch: int, r: int = 4) -> None:
@@ -101,7 +101,7 @@ class _RayBranch(nn.Module):
         return self.blocks(self.expand(x))
 
 
-class GRALPAttnEncoder(EncoderBase):
+class CircularAttnEncoder(EncoderBase):
     """Ray encoder with circular dilated conv + multi-query, multi-head attention."""
 
     def __init__(self, vec_dim: int, *, feature_dim: int = 256, hidden: int = 64,
@@ -315,7 +315,7 @@ ENCODER_REGISTRY: dict[str, type] = {
     "mlp": MLPEncoder,
     "cnn_zeropad": CNNZeroPadEncoder,
     "cnn_circular": CNNCircularEncoder,
-    "gralp_attn": GRALPAttnEncoder,
+    "circular_attn": CircularAttnEncoder,
 }
 
 
