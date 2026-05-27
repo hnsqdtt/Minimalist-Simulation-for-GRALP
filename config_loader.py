@@ -47,6 +47,13 @@ def load_simulation_config(
     data.setdefault("INFERENCE_BACKEND", "auto")
     data.setdefault("INFERENCE_DEVICE", "cpu")
 
+    # Translucent orange polygon visualizing the actual line-of-sight visible
+    # region (rays clipped at obstacles). Pure visual: built from the same
+    # los_points the policy consumes -- zero extra raycasts. No collision
+    # shape, mass=0, so it neither blocks rays nor registers contact.
+    data.setdefault("SHOW_LOS_POLYGON", True)
+    data.setdefault("LOS_POLYGON_COLOR", [1.0, 0.5, 0.0, 0.25])
+
     speed_range = data.get("DYNAMIC_OBSTACLE_SPEED_RANGE", [0.5, 1.5])
     if not isinstance(speed_range, (list, tuple)) or len(speed_range) != 2:
         raise ValueError("DYNAMIC_OBSTACLE_SPEED_RANGE must be a [min, max] list/tuple")

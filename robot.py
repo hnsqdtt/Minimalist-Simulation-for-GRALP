@@ -10,6 +10,7 @@ class Robot:
         self.lidar_ray_ids = []
         self.orientation_line_id = None
         self.orientation_head_ids = [None, None]
+        self.los_polygon_id = None  # rebuilt every control step from LOS points
 
     def _create_robot(self):
         """Create cylindrical robot body."""
@@ -32,6 +33,55 @@ class Robot:
             basePosition=Config.ROBOT_START_POS,
         )
         return body_id
+
+    def update_los_polygon(self, robot_pos, los_points):
+        """Visualize the visible region as a translucent orange triangle fan.
+
+        Reuses the ``los_points`` already computed for the policy
+        (``task._build_los_points``) -- zero extra raycasts. Lives on the
+        lidar scan plane (``robot.z + LIDAR_HEIGHT``), so it is co-planar
+        with DEBUG_MODE rays and shrinks to the actual visible region
+        (radii < LIDAR_RANGE where obstacles intervene).
+
+        No collision shape and ``baseMass=0`` -> it does not block ``rayTest``,
+        does not appear in ``getContactPoints``, and does not perturb physics.
+        """
+        if not getattr(Config, "SHOW_LOS_POLYGON", False):
+            return
+        if not los_points:
+            return
+
+        # Tear down the previous frame's mesh; PyBullet mesh vertices are
+        # immutable after creation, so we rebuild per control step.
+        if self.los_polygon_id is not None:
+            try:
+                p.removeBody(self.los_polygon_id)
+            except Exception:
+                pass
+            self.los_polygon_id = None
+
+        z = float(robot_pos[2]) + float(Config.LIDAR_HEIGHT)
+        verts = [[float(robot_pos[0]), float(robot_pos[1]), z]]
+        for lx, ly, *_ in los_points:
+            verts.append([float(lx), float(ly), z])
+
+        # Triangle fan: (center, i, i+1) around the ring, closing back to vertex 1.
+        n = len(los_points)
+        indices = []
+        for i in range(1, n):
+            indices += [0, i, i + 1]
+        indices += [0, n, 1]
+
+        color = list(getattr(Config, "LOS_POLYGON_COLOR", [1.0, 0.5, 0.0, 0.25]))
+        vis = p.createVisualShape(
+            p.GEOM_MESH, vertices=verts, indices=indices, rgbaColor=color,
+        )
+        self.los_polygon_id = p.createMultiBody(
+            baseMass=0,
+            baseCollisionShapeIndex=-1,
+            baseVisualShapeIndex=vis,
+            basePosition=[0.0, 0.0, 0.0],   # vertices are world-frame already
+        )
 
     def apply_control(self, linear_vel, angular_vel):
         """Apply velocity command with config limits."""

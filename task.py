@@ -297,6 +297,7 @@ def main() -> None:
                 raw_lidar = robot.get_lidar_data()
                 ranges = np.asarray(raw_lidar, dtype=np.float32)
                 adjusted_ranges, los_points = _build_los_points(robot_pos, yaw, ranges, runner.patch_meters)
+                robot.update_los_polygon(robot_pos, los_points)
 
                 local_target = _select_local_target(los_points, robot_pos, yaw, (goal[0], goal[1]))
                 sin_ref, cos_ref, task_dist = _direction_to_target(robot_pos, yaw, local_target)
